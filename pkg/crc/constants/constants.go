@@ -154,6 +154,10 @@ func Win32BackgroundLauncherPath() string {
 
 // GetHomeDir returns the home directory for the current user
 func GetHomeDir() string {
+	dir := os.Getenv("XDG_DATA_HOME");
+	if dir != ""{
+		return dir
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		panic("Failed to get homeDir: " + err.Error())
