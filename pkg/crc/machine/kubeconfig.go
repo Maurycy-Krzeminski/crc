@@ -68,10 +68,19 @@ func writeKubeconfig(ip string, clusterConfig *types.ClusterConfig, ingressHTTPS
 		CertificateAuthorityData: ca,
 	}
 
-	if err := addContext(cfg, ip, clusterConfig, ca, adminContext, "kubeadmin", clusterConfig.KubeAdminPass, ingressHTTPSPort); err != nil {
+	kubeadminToken, err := getTokenForUser("kubeadmin", clusterConfig.KubeAdminPass, ip, ca, clusterConfig, ingressHTTPSPort)
+	if err != nil {
 		return err
 	}
-	if err := addContext(cfg, ip, clusterConfig, ca, developerContext, "developer", "developer", ingressHTTPSPort); err != nil {
+	if err := addContext(cfg, clusterConfig.ClusterAPI, adminContext, "kubeadmin", kubeadminToken); err != nil {
+		return err
+	}
+
+	developerToken, err := getTokenForUser("developer", "developer", ip, ca, clusterConfig, ingressHTTPSPort)
+	if err != nil {
+		return err
+	}
+	if err := addContext(cfg, clusterConfig.ClusterAPI, developerContext, "developer", developerToken); err != nil {
 		return err
 	}
 
@@ -133,15 +142,34 @@ func hostname(clusterAPI string) (string, error) {
 	return strings.ReplaceAll(h, ".", "-"), nil
 }
 
-func addContext(cfg *api.Config, ip string, clusterConfig *types.ClusterConfig, ca []byte, context, username, password string, ingressHTTPSPort uint) error {
-	host, err := hostname(clusterConfig.ClusterAPI)
+func addContext(cfg *api.Config, clusterAPI, context, username, token string) error {
+	host, err := hostname(clusterAPI)
 	if err != nil {
 		return err
 	}
+
+	// append /clustername to AuthInfo
+	clusterUser, err := appendClusternameToUser(username, clusterAPI)
+	if err != nil {
+		return err
+	}
+
+	cfg.AuthInfos[clusterUser] = &api.AuthInfo{
+		Token: token,
+	}
+	cfg.Contexts[context] = &api.Context{
+		Cluster:   host,
+		AuthInfo:  clusterUser,
+		Namespace: "default",
+	}
+	return nil
+}
+
+func getTokenForUser(username, password, ip string, ca []byte, clusterConfig *types.ClusterConfig, ingressHTTPSPort uint) (string, error) {
 	roots := x509.NewCertPool()
 	ok := roots.AppendCertsFromPEM(ca)
 	if !ok {
-		return fmt.Errorf("failed to parse root certificate")
+		return "", fmt.Errorf("failed to parse root certificate")
 	}
 	restConfig := &restclient.Config{
 		Proxy: clusterConfig.ProxyConfig.ProxyFunc(),
@@ -172,17 +200,9 @@ func addContext(cfg *api.Config, ip string, clusterConfig *types.ClusterConfig, 
 	challengeHandler := challengehandlers.NewBasicChallengeHandler(restConfig.Host, "" /* webconsoleURL */, nil /* in */, nil /* out */, nil /* passwordPrompter */, username, password)
 	token, err := tokenrequest.RequestTokenWithChallengeHandlers(restConfig, challengeHandler)
 	if err != nil {
-		return err
+		return "", err
 	}
-	cfg.AuthInfos[username] = &api.AuthInfo{
-		Token: token,
-	}
-	cfg.Contexts[context] = &api.Context{
-		Cluster:   host,
-		AuthInfo:  username,
-		Namespace: "default",
-	}
-	return nil
+	return token, nil
 }
 
 // getGlobalKubeConfigPath returns the path to the first entry in the KUBECONFIG environment variable
@@ -264,19 +284,57 @@ func mergeConfigHelper(kubeConfigFile, globalConfigFile string) error {
 	if err != nil {
 		return err
 	}
+	// append cluster name to the AuthInfos
+	cfg, err := appendClusterToAuthinfos(currentConf)
+	if err != nil {
+		return err
+	}
 	// Merge the currentConf to globalConfig
-	for name, cluster := range currentConf.Clusters {
+	for name, cluster := range cfg.Clusters {
 		globalConf.Clusters[name] = cluster
 	}
 
-	for name, authInfo := range currentConf.AuthInfos {
+	for name, authInfo := range cfg.AuthInfos {
 		globalConf.AuthInfos[name] = authInfo
 	}
 
-	for name, context := range currentConf.Contexts {
+	for name, context := range cfg.Contexts {
 		globalConf.Contexts[name] = context
 	}
 
-	globalConf.CurrentContext = currentConf.CurrentContext
+	globalConf.CurrentContext = cfg.CurrentContext
 	return clientcmd.WriteToFile(*globalConf, globalConfigPath)
+}
+
+func appendClusterToAuthinfos(cfg *api.Config) (*api.Config, error) {
+	var clusterAPI string
+	for _, cluster := range cfg.Clusters {
+		clusterAPI = cluster.Server
+	}
+	for name, authInfo := range cfg.AuthInfos {
+		delete(cfg.AuthInfos, name)
+		username, err := appendClusternameToUser(name, clusterAPI)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.AuthInfos[username] = authInfo
+	}
+	for _, ctx := range cfg.Contexts {
+		username, err := appendClusternameToUser(ctx.AuthInfo, clusterAPI)
+		if err != nil {
+			return cfg, err
+		}
+		ctx.AuthInfo = username
+	}
+	return cfg, nil
+}
+
+func appendClusternameToUser(username, clusterAPI string) (string, error) {
+	url, err := url.Parse(clusterAPI)
+	if err != nil {
+		return "", err
+	}
+	clusterURL := strings.ReplaceAll(url.Host, ".", "-")
+
+	return fmt.Sprintf("%s/%s", username, clusterURL), nil
 }

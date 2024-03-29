@@ -19,7 +19,8 @@ var hypervPreflightChecks = []Check{
 		configKeySuffix:  "check-administrator-user",
 		checkDescription: "Checking if running in a shell with administrator rights",
 		check:            checkIfRunningAsNormalUser,
-		flags:            StartUpOnly,
+		fixDescription:   "crc should be run in a shell without administrator rights",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
@@ -27,7 +28,8 @@ var hypervPreflightChecks = []Check{
 		configKeySuffix:  "check-windows-version",
 		checkDescription: "Checking Windows release",
 		check:            checkVersionOfWindowsUpdate,
-		flags:            StartUpOnly,
+		fixDescription:   "Please manually update your Windows 10 installation",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
@@ -35,7 +37,8 @@ var hypervPreflightChecks = []Check{
 		configKeySuffix:  "check-windows-edition",
 		checkDescription: "Checking Windows edition",
 		check:            checkWindowsEdition,
-		flags:            StartUpOnly,
+		fixDescription:   "Your Windows edition is not supported. Consider using Professional or Enterprise editions of Windows",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
@@ -43,7 +46,8 @@ var hypervPreflightChecks = []Check{
 		configKeySuffix:  "check-hyperv-installed",
 		checkDescription: "Checking if Hyper-V is installed and operational",
 		check:            checkHyperVInstalled,
-		flags:            StartUpOnly,
+		fixDescription:   "Make sure you installed crc using the Windows installer and performed the required reboot",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
@@ -51,7 +55,8 @@ var hypervPreflightChecks = []Check{
 		configKeySuffix:  "check-hyperv-service-running",
 		checkDescription: "Checking if Hyper-V service is enabled",
 		check:            checkHyperVServiceRunning,
-		flags:            StartUpOnly,
+		fixDescription:   "Make sure you installed crc using the Windows installer and performed the required reboot",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
@@ -85,7 +90,8 @@ var vsockChecks = []Check{
 		configKeySuffix:  "check-vsock",
 		checkDescription: "Checking if vsock is correctly configured",
 		check:            checkVsock,
-		flags:            StartUpOnly,
+		fixDescription:   "Make sure you installed crc using the Windows installer and performed the required reboot",
+		flags:            NoFix,
 
 		labels: labels{Os: Windows, NetworkMode: User},
 	},
@@ -137,15 +143,15 @@ var adminHelperServiceCheks = []Check{
 		configKeySuffix:  "check-admin-helper-service-running",
 		checkDescription: "Checking admin helper service is running",
 		check:            checkIfAdminHelperServiceRunning,
-		fixDescription:   "Make sure you installed crc using the Windows installer and performed required reboot",
+		fixDescription:   "Make sure you installed crc using the Windows installer and performed the required reboot",
 		flags:            NoFix,
 
 		labels: labels{Os: Windows},
 	},
 }
 
-// 'crc-user' group is supposed to be created by the msi or chocolatey
-// this check makes sure that was done before stating crc, it does not
+// The 'crc-users' group is supposed to be created by the msi or chocolatey
+// this check makes sure that was done before starting crc, it does not
 // have a fix function since this'll be handled by the msi or choco
 var crcUsersGroupExistsCheck = Check{
 	configKeySuffix:  "check-crc-users-group-exists",
@@ -156,11 +162,16 @@ var crcUsersGroupExistsCheck = Check{
 		}
 		return nil
 	},
-	flags: StartUpOnly,
+	fixDescription: "Make sure you installed crc using the Windows installer and performed the required reboot",
+	flags:          NoFix,
 
 	labels: labels{Os: Windows},
 }
 
+// When installed through chocolatey, `fixUserPartOfCrcUsersAndHypervAdminsGroup`
+// is needed as chocolatey is not doing this step.
+//
+// When installed with the MSI, the user should already be part of the required groups.
 var userPartOfCrcUsersAndHypervAdminsGroupCheck = Check{
 	configKeySuffix:  "check-user-in-crc-users-and-hyperv-admins-group",
 	checkDescription: "Checking if current user is in crc-users and Hyper-V admins group",
@@ -212,6 +223,7 @@ func getAllPreflightChecks() []Check {
 func getChecks(bundlePath string, preset crcpreset.Preset, enableBundleQuayFallback bool) []Check {
 	checks := []Check{}
 	checks = append(checks, memoryCheck(preset))
+	checks = append(checks, removePodmanFromOcBinDirCheck())
 	checks = append(checks, hypervPreflightChecks...)
 	checks = append(checks, crcUsersGroupExistsCheck)
 	checks = append(checks, userPartOfCrcUsersAndHypervAdminsGroupCheck)
@@ -221,6 +233,7 @@ func getChecks(bundlePath string, preset crcpreset.Preset, enableBundleQuayFallb
 	checks = append(checks, cleanupCheckRemoveCrcVM)
 	checks = append(checks, daemonTaskChecks...)
 	checks = append(checks, adminHelperServiceCheks...)
+	checks = append(checks, sshPortCheck())
 	return checks
 }
 

@@ -2,12 +2,12 @@ all: install
 
 SHELL := /bin/bash
 
-OPENSHIFT_VERSION ?= 4.14.7
+OPENSHIFT_VERSION ?= 4.14.12
 PODMAN_VERSION ?= 4.4.4
-OKD_VERSION ?= 4.14.0-0.okd-2023-12-01-225814
-MICROSHIFT_VERSION ?= 4.14.7
+OKD_VERSION ?= 4.14.0-0.okd-scos-2024-01-10-151818
+MICROSHIFT_VERSION ?= 4.15.0
 BUNDLE_EXTENSION = crcbundle
-CRC_VERSION = 2.31.0
+CRC_VERSION = 2.34.0
 COMMIT_SHA?=$(shell git rev-parse --short=6 HEAD)
 MACOS_INSTALL_PATH = /usr/local/crc
 CONTAINER_RUNTIME ?= podman
@@ -42,6 +42,11 @@ RELEASE_INFO := release-info.json
 
 CUSTOM_EMBED ?= false
 EMBED_DOWNLOAD_DIR ?= tmp-embed
+
+SELINUX_VOLUME_LABEL = :Z
+ifeq ($(GOOS),darwin)
+SELINUX_VOLUME_LABEL :=
+endif
 
 # Check that given variables are set and all have non-empty values,
 # die with an error otherwise.
@@ -142,15 +147,15 @@ test-rpmbuild: spec
 
 .PHONY: build_docs
 build_docs:
-	${CONTAINER_RUNTIME} run -v $(CURDIR):/antora:Z --rm $(DOCS_BUILD_CONTAINER) --stacktrace antora-playbook.yml
+	${CONTAINER_RUNTIME} run -v $(CURDIR):/antora$(SELINUX_VOLUME_LABEL) --rm $(DOCS_BUILD_CONTAINER) --stacktrace antora-playbook.yml
 
 .PHONY: docs_serve
 docs_serve: build_docs
-	${CONTAINER_RUNTIME} run -it -v $(CURDIR)/docs/build:/usr/local/apache2/htdocs/:Z --rm -p 8088:80/tcp $(DOCS_SERVE_CONTAINER)
+	${CONTAINER_RUNTIME} run -it -v $(CURDIR)/docs/build:/usr/local/apache2/htdocs/$(SELINUX_VOLUME_LABEL) --rm -p 8088:80/tcp $(DOCS_SERVE_CONTAINER)
 
 .PHONY: docs_check_links
 docs_check_links:
-	${CONTAINER_RUNTIME} run -v $(CURDIR):/test:Z --rm $(DOCS_TEST_CONTAINER) -c .htmltest.yml
+	${CONTAINER_RUNTIME} run -v $(CURDIR):/test$(SELINUX_VOLUME_LABEL) --rm $(DOCS_TEST_CONTAINER) -c .htmltest.yml
 
 .PHONY: clean_docs clean_macos_package
 clean_docs:

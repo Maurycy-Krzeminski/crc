@@ -31,6 +31,7 @@ var (
 	cleanupHome        bool
 	testWithShell      string
 	CRCVersion         string
+	CRCMemory          string
 
 	GodogTags string
 )
@@ -49,6 +50,7 @@ func ParseFlags() {
 	pflag.StringVar(&CRCExecutable, "crc-binary", "", "Path to the CRC executable to be tested")
 	pflag.BoolVar(&cleanupHome, "cleanup-home", false, "Try to remove crc home folder before starting the suite") // TODO: default=true
 	pflag.StringVar(&CRCVersion, "crc-version", defaultCRCVersion(), "Version of CRC to be tested")
+	pflag.StringVar(&CRCMemory, "crc-memory", "", "Memory for CRC VM in MiB")
 }
 
 func InitializeTestSuite(tctx *godog.TestSuiteContext) {
@@ -808,10 +810,12 @@ func EnsureCRCIsRunning() error {
 			return err
 		}
 
-		// set up and start the cluster with lots of memory
-		err = SetConfigPropertyToValueSucceedsOrFails("memory", "12000", "succeeds")
-		if err != nil {
-			return err
+		// set up and start the cluster with lots of memory, if specified
+		if CRCMemory != "" {
+			err = SetConfigPropertyToValueSucceedsOrFails("memory", CRCMemory, "succeeds")
+			if err != nil {
+				return err
+			}
 		}
 
 		err = ExecuteSingleCommandWithExpectedExitStatus("setup", "succeeds") // uses the right bundle argument if needed
@@ -842,14 +846,44 @@ func EnsureCRCIsRunning() error {
 }
 
 func EnsureUserIsLoggedIntoClusterSucceedsOrFails(expected string) error {
+
 	if err := setOcEnv(); err != nil {
 		return err
 	}
-	return util.LoginToOcClusterSucceedsOrFails(expected)
+
+	err := util.LoginToOcCluster([]string{})
+	if expected == "succeeds" && err != nil && strings.Contains(err.Error(), "The server uses a certificate signed by unknown authority") {
+		// do some logging
+
+		err1 := util.ExecuteCommand("oc config view --raw -o jsonpath=\"{.clusters[?(@.name=='api-crc-testing:6443')].cluster.certificate-authority-data}\" > ca.base64")
+		if err1 != nil {
+			fmt.Println(err1)
+		}
+		err1 = DecodeBase64File("ca.base64", "ca.crt")
+		if err1 != nil {
+			fmt.Println(err1)
+		}
+		err1 = util.ExecuteCommand("echo QUIT | openssl s_client -connect api.crc.testing:6443 | openssl x509 -out server.crt")
+		if err1 != nil {
+			fmt.Println(err1)
+		}
+		err1 = util.ExecuteCommand("openssl verify -CAfile ca.crt server.crt")
+		if err1 != nil {
+			fmt.Println(err1)
+		}
+
+		// login with ignorance
+		err = util.LoginToOcCluster([]string{"--insecure-skip-tls-verify"})
+	}
+	return err
 }
 
 func EnsureOCCommandIsAvailable() error {
-	return setOcEnv()
+	err := setOcEnv()
+	if err != nil {
+		return err
+	}
+	return setPodmanEnv()
 }
 
 func setOcEnv() error {
@@ -857,6 +891,13 @@ func setOcEnv() error {
 		return util.ExecuteCommandSucceedsOrFails("crc oc-env | Invoke-Expression", "succeeds")
 	}
 	return util.ExecuteCommandSucceedsOrFails("eval $(crc oc-env)", "succeeds")
+}
+
+func setPodmanEnv() error {
+	if runtime.GOOS == "windows" {
+		return util.ExecuteCommandSucceedsOrFails("crc podman-env | Invoke-Expression", "succeeds")
+	}
+	return util.ExecuteCommandSucceedsOrFails("eval $(crc podman-env)", "succeeds")
 }
 
 func SetConfigPropertyToValueSucceedsOrFails(property string, value string, expected string) error {
@@ -907,13 +948,13 @@ func DeletingPodSucceedsOrFails(expected string) error {
 func PodmanCommandIsAvailable() error {
 
 	// Do what 'eval $(crc podman-env) would do
-	path := os.ExpandEnv("${HOME}/.crc/bin/oc:$PATH")
+	path := os.ExpandEnv("${HOME}/.crc/bin/podman:$PATH")
 	csshk := os.ExpandEnv("${HOME}/.crc/machines/crc/id_ecdsa")
 	dh := os.ExpandEnv("unix:///${HOME}/.crc/machines/crc/docker.sock")
 	ch := "ssh://core@127.0.0.1:2222/run/user/1000/podman/podman.sock"
 	if runtime.GOOS == "windows" {
 		userHomeDir, _ := os.UserHomeDir()
-		unexpandedPath := filepath.Join(userHomeDir, ".crc/bin/oc;${PATH}")
+		unexpandedPath := filepath.Join(userHomeDir, ".crc/bin/podman;${PATH}")
 		path = os.ExpandEnv(unexpandedPath)
 		csshk = filepath.Join(userHomeDir, ".crc/machines/crc/id_ecdsa")
 		dh = "npipe:////./pipe/crc-podman"

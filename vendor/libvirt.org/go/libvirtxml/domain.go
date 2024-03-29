@@ -276,6 +276,19 @@ type DomainDiskMetadataCacheSize struct {
 	Value int    `xml:",cdata"`
 }
 
+type DomainDiskIOThreads struct {
+	IOThread []DomainDiskIOThread `xml:"iothread"`
+}
+
+type DomainDiskIOThread struct {
+	ID     uint                      `xml:"id,attr"`
+	Queues []DomainDiskIOThreadQueue `xml:"queue"`
+}
+
+type DomainDiskIOThreadQueue struct {
+	ID uint `xml:"id,attr"`
+}
+
 type DomainDiskDriver struct {
 	Name           string                   `xml:"name,attr,omitempty"`
 	Type           string                   `xml:"type,attr,omitempty"`
@@ -289,6 +302,7 @@ type DomainDiskDriver struct {
 	Discard        string                   `xml:"discard,attr,omitempty"`
 	DiscardNoUnref string                   `xml:"discard_no_unref,attr,omitempty"`
 	IOThread       *uint                    `xml:"iothread,attr"`
+	IOThreads      *DomainDiskIOThreads     `xml:"iothreads"`
 	DetectZeros    string                   `xml:"detect_zeroes,attr,omitempty"`
 	Queues         *uint                    `xml:"queues,attr"`
 	QueueSize      *uint                    `xml:"queue_size,attr"`
@@ -510,6 +524,17 @@ type DomainFilesystemBinary struct {
 	ThreadPool *DomainFilesystemBinaryThreadPool `xml:"thread_pool"`
 }
 
+type DomainFilesystemIDMapEntry struct {
+	Start  uint `xml:"start,attr"`
+	Target uint `xml:"target,attr"`
+	Count  uint `xml:"count,attr"`
+}
+
+type DomainFilesystemIDMap struct {
+	UID []DomainFilesystemIDMapEntry `xml:"uid"`
+	GID []DomainFilesystemIDMapEntry `xml:"gid"`
+}
+
 type DomainFilesystem struct {
 	XMLName        xml.Name                        `xml:"filesystem"`
 	AccessMode     string                          `xml:"accessmode,attr,omitempty"`
@@ -519,6 +544,7 @@ type DomainFilesystem struct {
 	DMode          string                          `xml:"dmode,attr,omitempty"`
 	Driver         *DomainFilesystemDriver         `xml:"driver"`
 	Binary         *DomainFilesystemBinary         `xml:"binary"`
+	IDMap          *DomainFilesystemIDMap          `xml:"idmap"`
 	Source         *DomainFilesystemSource         `xml:"source"`
 	Target         *DomainFilesystemTarget         `xml:"target"`
 	ReadOnly       *DomainFilesystemReadOnly       `xml:"readonly"`
@@ -1523,6 +1549,7 @@ type DomainAudio struct {
 	SPICE       *DomainAudioSPICE      `xml:"-"`
 	File        *DomainAudioFile       `xml:"-"`
 	DBus        *DomainAudioDBus       `xml:"-"`
+	PipeWire    *DomainAudioPipeWire   `xml:"-"`
 }
 
 type DomainAudioChannel struct {
@@ -1604,6 +1631,19 @@ type DomainAudioPulseAudio struct {
 }
 
 type DomainAudioPulseAudioChannel struct {
+	DomainAudioChannel
+	Name       string `xml:"name,attr,omitempty"`
+	StreamName string `xml:"streamName,attr,omitempty"`
+	Latency    uint   `xml:"latency,attr,omitempty"`
+}
+
+type DomainAudioPipeWire struct {
+	RuntimeDir string                        `xml:"runtimeDir,attr,omitempty"`
+	Input      *DomainAudioPulseAudioChannel `xml:"input"`
+	Output     *DomainAudioPulseAudioChannel `xml:"output"`
+}
+
+type DomainAudioPipeWireChannel struct {
 	DomainAudioChannel
 	Name       string `xml:"name,attr,omitempty"`
 	StreamName string `xml:"streamName,attr,omitempty"`
@@ -1752,7 +1792,8 @@ type DomainHostdevSubsysPCISource struct {
 }
 
 type DomainHostdevSubsysPCIDriver struct {
-	Name string `xml:"name,attr,omitempty"`
+	Name  string `xml:"name,attr,omitempty"`
+	Model string `xml:"model,attr,omitempty"`
 }
 
 type DomainHostdevSubsysPCI struct {
@@ -1883,13 +1924,14 @@ type DomainMemorydevTargetAddress struct {
 }
 
 type DomainMemorydevTarget struct {
-	Size      *DomainMemorydevTargetSize      `xml:"size"`
-	Node      *DomainMemorydevTargetNode      `xml:"node"`
-	Label     *DomainMemorydevTargetLabel     `xml:"label"`
-	Block     *DomainMemorydevTargetBlock     `xml:"block"`
-	Requested *DomainMemorydevTargetRequested `xml:"requested"`
-	ReadOnly  *DomainMemorydevTargetReadOnly  `xml:"readonly"`
-	Address   *DomainMemorydevTargetAddress   `xml:"address"`
+	DynamicMemslots string                          `xml:"dynamicMemslots,attr,omitempty"`
+	Size            *DomainMemorydevTargetSize      `xml:"size"`
+	Node            *DomainMemorydevTargetNode      `xml:"node"`
+	Label           *DomainMemorydevTargetLabel     `xml:"label"`
+	Block           *DomainMemorydevTargetBlock     `xml:"block"`
+	Requested       *DomainMemorydevTargetRequested `xml:"requested"`
+	ReadOnly        *DomainMemorydevTargetReadOnly  `xml:"readonly"`
+	Address         *DomainMemorydevTargetAddress   `xml:"address"`
 }
 
 type DomainMemorydev struct {
@@ -2341,10 +2383,11 @@ type DomainCPUModel struct {
 }
 
 type DomainCPUTopology struct {
-	Sockets int `xml:"sockets,attr,omitempty"`
-	Dies    int `xml:"dies,attr,omitempty"`
-	Cores   int `xml:"cores,attr,omitempty"`
-	Threads int `xml:"threads,attr,omitempty"`
+	Sockets  int `xml:"sockets,attr,omitempty"`
+	Dies     int `xml:"dies,attr,omitempty"`
+	Clusters int `xml:"clusters,attr,omitempty"`
+	Cores    int `xml:"cores,attr,omitempty"`
+	Threads  int `xml:"threads,attr,omitempty"`
 }
 
 type DomainCPUFeature struct {
@@ -5765,6 +5808,11 @@ func (a *DomainAudio) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 			xml.Name{Local: "type"}, "dbus",
 		})
 		return e.EncodeElement(a.DBus, start)
+	} else if a.PipeWire != nil {
+		start.Attr = append(start.Attr, xml.Attr{
+			xml.Name{Local: "type"}, "pipewire",
+		})
+		return e.EncodeElement(a.PipeWire, start)
 	}
 	return nil
 }
@@ -5871,6 +5919,14 @@ func (a *DomainAudio) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error
 			return err
 		}
 		a.DBus = &dbus
+		return nil
+	} else if typ == "pipewire" {
+		var pipewire DomainAudioPipeWire
+		err := d.DecodeElement(&pipewire, &start)
+		if err != nil {
+			return err
+		}
+		a.PipeWire = &pipewire
 		return nil
 	}
 	return nil
